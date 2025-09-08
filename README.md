@@ -1,169 +1,172 @@
-# Pipeline de Análise de Vendas com Apache Beam e Dataflow
+# Sales Analysis Pipeline with Apache Beam and Dataflow
 
-Este projeto implementa um pipeline de dados ETL (Extração, Transformação e Carga) que processa um arquivo CSV de vendas, realiza a sanitização e limpeza dos dados, e calcula a soma total de fretes, agrupada por categoria, para pedidos entregues e cancelados.
+This project implements an ETL (Extract, Transform, Load) data pipeline that processes a sales CSV file, performs data sanitization and cleaning, and calculates the total freight costs, grouped by category, for delivered and canceled orders.
 
-O pipeline é construído com Apache Beam em Python e projetado para ser executado de forma escalável no Google Cloud Dataflow.
+The pipeline is built with Apache Beam in Python and is designed to run scalably on Google Cloud Dataflow.
 
-## Arquitetura
+## Architecture
 
-O fluxo de dados segue uma arquitetura simples e robusta na nuvem:
+The data flow follows a simple and robust cloud architecture:
 
 **Google Cloud Storage (GCS)** ➔ **Google Cloud Dataflow** ➔ **Google Cloud Storage (GCS)**
 
-1.  **Extração:** O pipeline lê o arquivo `vendas_faker.csv` de uma pasta `input` no GCS.
-2.  **Transformação:** Um job do Dataflow executa a lógica do Beam para limpar, validar, transformar e agregar os dados em memória.
-3.  **Carga:** O resultado agregado é escrito como um novo arquivo CSV numa pasta `output` no GCS.
+1.  **Extraction:** The pipeline reads the `vendas_faker.csv` file from an `input` folder in GCS.
+2.  **Transformation:** A Dataflow job executes the Beam logic to clean, validate, transform, and aggregate the data in memory.
+3.  **Load:** The aggregated result is written as a new CSV file to an `output` folder in GCS.
 
 ---
 
-## 4. Pré-requisitos
+## 4. Prerequisites
 
-Antes de começar, garanta que você tem as seguintes ferramentas instaladas e configuradas:
+Before you begin, ensure you have the following tools installed and configured:
 
 * **Python 3.12+**
-* **`uv`**: Um instalador e gerenciador de pacotes Python extremamente rápido. (Instruções em [astral.sh/uv](https://astral.sh/uv))
-* **Google Cloud SDK (`gcloud`)**: Instalado e autenticado na sua conta Google.
-* Um projeto ativo no Google Cloud Platform com o faturamento ativado.
+* **`uv`**: An extremely fast Python package installer and manager. (Instructions at [astral.sh/uv](https://astral.sh/uv))
+* **Google Cloud SDK (`gcloud`)**: Installed and authenticated with your Google account.
+* An active Google Cloud Platform project with billing enabled.
 
 ---
 
-## 5. Configuração do Ambiente (GCP)
+## 5. Environment Setup (GCP)
 
-Siga estes passos para configurar a infraestrutura necessária no Google Cloud.
+Follow these steps to set up the necessary infrastructure in Google Cloud.
 
-### 5.1. Configuração do Projeto GCP
+### 5.1. GCP Project Setup
 
-Defina o seu projeto ativo no `gcloud`:
+First, set your active project in `gcloud`:
 ```bash
-gcloud config set project SEU-PROJECT-ID
+gcloud config set project YOUR-PROJECT-ID
 ```
 
-### 5.2. Criação da Service Account
+### 5.2. Service Account Creation
 
-O Dataflow precisa de uma identidade (Service Account) para operar.
+Dataflow requires an identity (Service Account) to operate.
 ```bash
-# Crie a Service Account
-gcloud iam service-accounts create dataflow-vendas-sa --display-name="Service Account para Pipeline de Vendas"
+# Create the Service Account
+gcloud iam service-accounts create dataflow-vendas-sa --display-name="Service Account for Sales Pipeline"
 
-# Dê as permissões necessárias (substitua SEU-PROJECT-ID)
-gcloud projects add-iam-policy-binding SEU-PROJECT-ID --member="serviceAccount:dataflow-vendas-sa@SEU-PROJECT-ID.iam.gserviceaccount.com" --role="roles/dataflow.worker"
-gcloud projects add-iam-policy-binding SEU-PROJECT-ID --member="serviceAccount:dataflow-vendas-sa@SEU-PROJECT-ID.iam.gserviceaccount.com" --role="roles/dataflow.admin"
-gcloud projects add-iam-policy-binding SEU-PROJECT-ID --member="serviceAccount:dataflow-vendas-sa@SEU-PROJECT-ID.iam.gserviceaccount.com" --role="roles/storage.admin"
+# Grant the necessary permissions (replace YOUR-PROJECT-ID)
+gcloud projects add-iam-policy-binding YOUR-PROJECT-ID --member="serviceAccount:dataflow-vendas-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com" --role="roles/dataflow.worker"
+gcloud projects add-iam-policy-binding YOUR-PROJECT-ID --member="serviceAccount:dataflow-vendas-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com" --role="roles/dataflow.admin"
+gcloud projects add-iam-policy-binding YOUR-PROJECT-ID --member="serviceAccount:dataflow-vendas-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com" --role="roles/storage.admin"
 ```
 
-### 5.3. Criação do Bucket no Google Cloud Storage
+### 5.3. Google Cloud Storage Bucket Creation
 
-O pipeline precisa de um bucket para armazenar todos os seus arquivos.
+The pipeline needs a bucket to store all its files.
 ```bash
-# Crie o bucket (escolha um nome único globalmente)
-gsutil mb gs://SEU-BUCKET-NAME
+# Create the bucket (choose a globally unique name)
+gsutil mb gs://YOUR-BUCKET-NAME
 
-# (Opcional) Crie as pastas dentro do bucket
-gsutil mkdir gs://SEU-BUCKET-NAME/input/ gs://SEU-BUCKET-NAME/output/ gs://SEU-BUCKET-NAME/temp/ gs://SEU-BUCKET-NAME/staging/ gs://SEU-BUCKET-NAME/models/
+# (Optional) Create the folders inside the bucket
+gsutil mkdir gs://YOUR-BUCKET-NAME/input/ gs://YOUR-BUCKET-NAME/output/ gs://YOUR-BUCKET-NAME/temp/ gs://YOUR-BUCKET-NAME/staging/ gs://YOUR-BUCKET-NAME/models/
 ```
 
-### 5.4. Autenticação Local
+### 5.4. Local Authentication
 
-Para que seu script Python possa interagir com o GCP, gere uma chave de autenticação.
+To allow your Python script to interact with GCP from your local machine, generate an authentication key.
 ```bash
-# Crie e faça o download de uma chave para a Service Account
-gcloud iam service-accounts keys create gcp-credentials.json --iam-account="dataflow-vendas-sa@SEU-PROJECT-ID.iam.gserviceaccount.com"
+# Create and download a key for the Service Account
+gcloud iam service-accounts keys create gcp-credentials.json --iam-account="dataflow-vendas-sa@YOUR-PROJECT-ID.iam.gserviceaccount.com"
 
-# Defina a variável de ambiente para que as bibliotecas do Google a encontrem
+# Set the environment variable so the Google libraries can find it
 export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/gcp-credentials.json"
 ```
-**Importante:** Adicione `gcp-credentials.json` ao seu ficheiro `.gitignore` para nunca enviar esta chave para um repositório!
+**Important:** Add `gcp-credentials.json` to your `.gitignore` file to never commit this key to a repository!
 
 ---
 
-## 6. Configuração do Ambiente Local com `uv`
+## 6. Local Environment Setup with `uv`
 
-Com o ambiente na nuvem pronto, configure o projeto na sua máquina.
+With the cloud environment ready, set up the project on your machine.
 
 ```bash
-# 1. Clone este repositório
-git clone <URL_DO_SEU_REPOSITORIO>
-cd <NOME_DO_REPOSITORIO>
+# 1. Clone this repository
+git clone <URL_OF_YOUR_REPOSITORY>
+cd <NAME_OF_YOUR_REPOSITORY>
 
-# 2. Crie um ambiente virtual com uv
+# 2. Create a virtual environment with uv
 uv venv
 
-# 3. Ative o ambiente virtual (o comando é o mesmo)
+# 3. Activate the virtual environment (command is the same)
 source .venv/bin/activate
 
-# 4. Instale as dependências com uv
+# 4. Install dependencies with uv
 uv pip install -r requirements.txt
 
-# 5. Configure as variáveis de ambiente locais
-# Copie o ficheiro de exemplo e preencha com os seus dados
+# 5. Configure the local environment variables
+# Copy the example file and fill it in with your details
 cp .env.example .env
-nano .env  # ou use seu editor preferido para preencher os valores
+nano .env  # or use your favorite editor to fill in the values
 ```
 
 ---
 
-## 7. Como Executar o Pipeline
+## 7. How to Run the Pipeline
 
-Com tudo configurado, siga estes passos:
+With everything configured, follow these steps:
 
-### 7.1. Preparar os Dados de Entrada
+### 7.1. Prepare the Input Data
 
-Gere os dados de exemplo e envie para o GCS.
+Generate the sample data and upload it to GCS.
 ```bash
-# Gere o ficheiro de dados localmente
+# Generate the data file locally
 python generator-data.py
 
-# Envie o ficheiro para a pasta 'input' no seu bucket
-gsutil cp vendas_faker.csv gs://SEU-BUCKET-NAME/input/
+# Upload the file to the 'input' folder in your bucket
+gsutil cp vendas_faker.csv gs://YOUR-BUCKET-NAME/input/
 ```
 
-### 7.2. Executar o Pipeline
+### 7.2. Run the Pipeline
 
-Execute o script `main.py`. Ele lerá as configurações do seu ficheiro `.env` e submeterá o job para o Dataflow.
+Execute the `main.py` script. It will read the settings from your `.env` file and submit the job to Dataflow.
 ```bash
 python main.py
 ```
-Acompanhe o job na interface do Dataflow no Console do Google Cloud.
+You can monitor the job in the Dataflow UI in the Google Cloud Console.
 
-### 7.3. Verificar a Saída
+### 7.3. Check the Output
 
-Após a conclusão do job, os resultados estarão na pasta de saída do seu bucket.
+After the job completes, the results will be in the output folder of your bucket.
 ```bash
-gsutil ls gs://SEU-BUCKET-NAME/output/
+gsutil ls gs://YOUR-BUCKET-NAME/output/
 ```
 
 ---
 
-## 8. Estrutura do Projeto
+## 8. Project Structure
 
 ```
 .
-├── .env                  # Suas configurações locais (NÃO ENVIAR PARA O GIT)
-├── .env.example          # Exemplo de configuração para outros desenvolvedores
+├── .env                  # Your local settings (DO NOT COMMIT TO GIT)
+├── .env.example          # Example configuration for other developers
 ├── .gitignore
-├── README.md             # Esta documentação
-├── gcp-credentials.json  # Chave de autenticação (NÃO ENVIAR PARA O GIT)
-├── generator-data.py     # Script para gerar dados de teste
-├── main.py               # Script principal que executa o pipeline
-├── requirements.txt      # Dependências Python do projeto
+├── README.md             # This documentation
+├── gcp-credentials.json  # Authentication key (DO NOT COMMIT TO GIT)
+├── generator-data.py     # Script to generate test data
+├── main.py               # Main script that runs the pipeline
+├── requirements.txt      # Python dependencies for the project
 └── pipeline/
     ├── __init__.py
-    └── transforms.py     # Módulo com as classes DoFn de transformação
+    └── transforms.py     # Module with DoFn transformation classes
 ```
 
-### 9 Executar o Job a Partir do Template
+---
 
-Com o template publicado, qualquer pessoa com as permissões corretas pode executar o pipeline usando este comando `gcloud`. Note que ele é muito mais limpo, pois a complexidade já está "empacotada" no template.
+## 9. Running the Job from a Template
+
+With the template published, anyone with the correct permissions can run the pipeline using this `gcloud` command. Note that it is much cleaner, as the complexity is already packaged into the template.
 
 ```bash
-PROJECT_ID="seu-project-id"
-BUCKET_NAME="seu-bucket-name"
+# Set variables for the command (replace with your values)
+PROJECT_ID="your-project-id"
+BUCKET_NAME="your-bucket-name"
 REGION="us-east1"
 JOB_NAME="vendas-processing-job"
 SERVICE_ACCOUNT_EMAIL="dataflow-vendas-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 TEMPLATE_PATH="gs://${BUCKET_NAME}/models/template_vendas.json"
 
-# Comando para executar o job
+# Command to run the job
 gcloud dataflow flex-template run ${JOB_NAME} \
     --template-file-gcs-location ${TEMPLATE_PATH} \
     --project ${PROJECT_ID} \
